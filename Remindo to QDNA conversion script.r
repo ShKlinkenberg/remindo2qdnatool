@@ -2,7 +2,7 @@
 
 # First create Remindo_files folder in the working directory
 # First create QDNA_files folder in the working directory
-# Also add your candidates info to the working directory to replzce remindo ID with "code / kenmerk"
+# Also add your candidates info to the working directory to replace remindo ID with "code / kenmerk"
 
 # In Remindo export the raw results through an admin account in the "beheer omgeving"
 
@@ -17,36 +17,33 @@
 rm(list=ls())
 
 # Set working directory
-setwd("replace_with_your_working_directory")
+setwd("Fill in your working directory")
 
 # Install the readxl package if it is not installed already
 if(!'readxl' %in% installed.packages()) { install.packages('readxl') }
+
 # Load readxl package
 library('readxl')
 
-# List all files in subdirectory and assign to files vector
-files <- list.files("Remindo_files")
+# List all xlsx files in "Remindo_files" and assign to files vector
+files <- list.files("Remindo_files",pattern = "\\.xlsx$", full.names = TRUE)
 
-# Subset to only suffix xlsx
-files <- grep("\\.xlsx$", files, value = TRUE)
-
-# Set file name. In the above command a list of multiple files could be ready for processing.
-# You can now use for example files[1] to run the conversion for the first file name.
-file_name = files["replace_with_number_of_file_to_convert"]
+# Choose file to convert from files
+print(files)
+file_name = files[3]
 
 # Read data
-results <- read_excel(paste("Remindo_files/", file_name, sep=''), col_names = T)
+results <- read_excel(file_name, col_names = T)
 
-# Start cleaning up.
+##Cleanup of read in data.
 
-# Replace all white spaces with . 
+# Change names of columns such that spaces are replaced with dots 
 names(results) <- gsub("\\s|-", "\\.", names(results))
-
-names(results)
 
 ## Get rid of aggregated rows.
 
-# Do not include all rows where 'Interactietype' contains '-'. This minus sign means that it is an aggregated row.
+# Do not include rows where 'Interactietype' contains '-'. 
+# '-' stands for aggregated rows.
 results <- subset(results, Interactietype != '-')
 
 ## Show item names
@@ -55,15 +52,11 @@ items <- unique(results$Vraag.ID)
 ## unique users
 users <- unique(results$Gebruiker.ID)
 
-
-# Replace Letters by numbers
-
-## Manualy check number of answer options
-
-# Use regular expression to find start ^ and end $ with capital letters and give unique answer number
+# Use regular expression to find answers that consist of a single capital letter.
+# Then count the unique results to determine amount of possible mc answers. 
 number_of_mc_answers <- length(unique(results[grep("^[A-Z]$", results$Antwoord), "Antwoord"]))
 
-# Replace eacht letter with a number. 
+# Replace answer letters with numbers for easier computations later on  
 for (i in 1:number_of_mc_answers){
   results[grep(paste("^[",toupper(letters)[i],"]$",sep = ""), results$Antwoord), "Antwoord"] = i
 }
@@ -75,31 +68,28 @@ for (i in 1:number_of_mc_answers){
 results$Vraag.ID <- paste(results$Vraag.ID, results$Interactienummer, sep=".")
 
 # Make answer key
-## Grep the columns with correct answers and merge into answer key
+## Create variable 
 unique_answers <- results[!duplicated(results$Vraag.ID),]
-
+#Determine columns that are returned if answer is correct
 answer_correct_columns <- unique_answers[grep(names(results),pattern = "Mapping\\.[0-9]{1,2}\\.{3}Correct")]
 
 ## transform answer columns into one vector
-answer_correct_columns <- data.matrix(answer_correct_columns) * matrix(rep(1:3,dim(answer_correct_columns)[1]),dim(answer_correct_columns)[1],
+answer_correct_columns <- data.matrix(answer_correct_columns) * matrix(rep(1:number_of_mc_answers,dim(answer_correct_columns)[1]),dim(answer_correct_columns)[1],
                                                                        dim(answer_correct_columns)[2],byrow = TRUE)
 answer_key <- apply(answer_correct_columns,1,sum)
 answer_key <- data.frame(Vraag.ID= unique_answers$Vraag.ID,answer_key = answer_key)
 
 # Extract these columns and reshape long to wide.
 ## Select all colums that we are not interested in. 
-drop.columns <- grep("[^Antwoord|Gebruiker\\.ID|Vraag\\.ID]", names(results), value = TRUE)
-drop.columns[69] <- "Vragenbank.ID" 
+# drop.columns <- grep("[^Antwoord|Gebruiker\\.ID|Vraag\\.ID]", names(results), value = TRUE)
+# drop.columns[length(drop.columns) + 1] <- "Vragenbank.ID" 
 
 # Reshape from long to wide. Use only columns of interest
 
-scores <- reshape(results,
+scores <- reshape(results[c("Gebruiker.ID","Vraag.ID", "Antwoord")],
                   # There are multiple lines per user based on the number of items
                   # and we only need one line per user.
                   timevar  =   "Vraag.ID",
-                  # We don't need all these columns so lets drop some
-                  drop     = drop.columns,
-                  # The two columns that we want are:
                   idvar    = "Gebruiker.ID",
                   # By reshaping the dataframe form long to wide we end up with 
                   # the columns we want.
@@ -116,7 +106,7 @@ scores <- scores[, c(1,mc_questions)]
 
 # Replace Remindo ID's with student numbers
 # Read data
-kandidaten <- read_excel("C:/Users/asasiad1/surfdrive/rprojects/remindo2qdnatool/kandidaten.xlsx", col_names = T)
+kandidaten <- read_excel("FILL IN THE FILE WITH USERS", col_names = T)
 kandidaten <- kandidaten[, c("ID", "Code/Kenmerk")]
 scores <- merge(scores, kandidaten, by.x = "Gebruiker.ID", by.y = "ID", all.x = TRUE)
 
@@ -140,14 +130,17 @@ answers <- cbind(studentnr = as.numeric(scores[, 'Code/Kenmerk']), 1, scores[gre
 # Combine answer key with results
 qDNAdata <- rbind(answer_key_vector, answer_key_vector, answers)
 
+#Replace NA with 9 for teleform
+
+qDNAdata[is.na(qDNAdata)] <- 9 
 # Write results to csv
-write.table(qDNAdata, paste("QDNA_files/", sub("xlsx", "csv", "test.csv"), sep=""), 
+write.table(qDNAdata, paste("QDNA_files/", sub("xlsx", "csv", gsub("Remindo_files/",replacement = "",x = file_name)), sep=""), 
             row.names = FALSE, 
             col.names = FALSE,
             sep       = ",")
 
 # Write Remindo item ID's to file in corresponding order
-write.table(sub("\\.1$", "", answer_key_df$Vraag.ID), paste("QDNA_files/", sub("xlsx", "_item_names.csv", "testmap"), sep=""), 
+write.table(sub("\\.1$", "", grep(x = answer_order$Vraag.ID,"\\.1$",value = TRUE)), paste("QDNA_files/", sub("xlsx", "_item_names.csv", gsub("Remindo_files/",replacement = "",x = file_name)), sep=""), 
             row.names = TRUE, 
             col.names = FALSE,
             sep       = ",")
